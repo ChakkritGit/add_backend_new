@@ -29,7 +29,7 @@ export const CreateInventorySchema = z.object({
 export const EditInventorySchema = z.object({
   floor: z.number().min(1).max(14).optional(),
   position: z.number().min(1).max(84).optional(),
-  quantity: z.number().min(1).max(60).optional(),
+  quantity: z.number().min(1).max(99).optional(),
   min: z.number().optional(),
   max: z.number().optional(),
   status: z.coerce.boolean().optional(),

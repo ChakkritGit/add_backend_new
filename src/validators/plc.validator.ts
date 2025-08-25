@@ -8,7 +8,7 @@ const customOrderIdRegex = new RegExp(`^OID-${uuidV4Regex.source}$`, 'i')
 export const PlcCommandSchema = z.object({
   floor: z.number().min(1).max(12).optional(),
   position: z.number().min(1).max(72).optional(),
-  qty: z.number().min(1).max(24).optional(),
+  qty: z.number().min(1).max(99).optional(),
   machineId: z
     .string()
     .regex(customMachineIdRegex, { message: 'Invalid Machine ID format.' })
