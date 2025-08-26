@@ -17,6 +17,9 @@ export const PlcCommandSchema = z.object({
   orderId: z
     .string()
     .regex(customOrderIdRegex, { message: 'Invalid Order ID format.' })
+    .optional(),
+  socketId: z
+    .string()
     .optional()
 })
 

@@ -10,6 +10,7 @@ import {
 import { HttpError } from '../../types/global'
 import { PlcCommand } from '../../types/plc'
 import { tcpService } from '../../services/tcp/tcp.service'
+import { socketService } from '../../services/socket/socket.service'
 
 export const plcSendCommand = async (
   req: Request,
@@ -25,10 +26,22 @@ export const plcSendCommand = async (
       throw new HttpError(409, 'Machine id field is missing.')
     }
 
+    if (!validatedBody.socketId) {
+      throw new HttpError(409, 'socket id field is missing.')
+    }
+
     const socket = tcpService.getSocketByMachineId(validatedBody.machineId)
     if (!socket || socket.destroyed) throw new Error('Socket not connected')
 
-    const result = await plcSendCommandService(validatedBody, socket)
+    const socketClient = socketService.getSocketById(validatedBody.socketId)
+    if (!socketClient || socketClient.disconnected)
+      throw new Error('Socket not connected')
+
+    const result = await plcSendCommandService(
+      validatedBody,
+      socket,
+      socketClient
+    )
 
     res.status(200).json({
       message: 'Success',
@@ -50,6 +63,10 @@ export const plcSendCommandM = async (
 
     if (!validatedBody.command || !validatedBody.machineId) {
       throw new HttpError(409, 'Command or machine id field is missing.')
+    }
+
+    if (!validatedBody.socketId) {
+      throw new HttpError(409, 'socket id field is missing.')
     }
 
     const commandValue = validatedBody.command.trim().toUpperCase()
@@ -74,10 +91,15 @@ export const plcSendCommandM = async (
     const socket = tcpService.getSocketByMachineId(validatedBody.machineId)
     if (!socket || socket.destroyed) throw new Error('Socket not connected')
 
+    const socketClient = socketService.getSocketById(validatedBody.socketId)
+    if (!socketClient || socketClient.disconnected)
+      throw new Error('Socket not connected')
+
     const result = await plcSendCommandMService(
       validatedBody,
       socket,
-      commandValue
+      commandValue,
+      socketClient
     )
 
     res.status(200).json({

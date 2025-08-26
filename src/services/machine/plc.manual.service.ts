@@ -1,7 +1,8 @@
-import { Socket } from 'net'
+import { Socket as TcpSocket } from 'net'
 import { failStatuses, PlcCommandTwo, successStatuses } from '../../types/plc'
 import prisma from '../../config/prisma'
 import { PlcCommandRequestBody } from '../../validators/plc.validator'
+import { DefaultEventsMap, Socket } from 'socket.io'
 
 const pad = (num: number, length: number) =>
   num.toString().padStart(length, '0')
@@ -112,7 +113,11 @@ const getMachineRunningCheck = async (id: string) => {
 const sendCommandtoCheckMachineStatus = async (
   cmd: string,
   running: number,
-  socket: Socket
+  socket: TcpSocket,
+  socketClient:
+    | Socket<DefaultEventsMap, DefaultEventsMap, DefaultEventsMap, any>
+    | undefined,
+  machineId: string | undefined
 ): Promise<{ status: string; raw: string }> => {
   return new Promise((resolve, reject) => {
     const m = parseInt(cmd.slice(1))
@@ -139,6 +144,7 @@ const sendCommandtoCheckMachineStatus = async (
         '| Status T:',
         status
       )
+      socketClient?.emit(String(machineId), message)
       resolve({ status, raw: message })
     }
 
@@ -147,9 +153,12 @@ const sendCommandtoCheckMachineStatus = async (
 }
 
 export const checkMachineStatus = async (
-  socket: Socket,
+  socket: TcpSocket,
   bodyData: PlcCommandRequestBody,
-  running: number
+  running: number,
+  socketClient:
+    | Socket<DefaultEventsMap, DefaultEventsMap, DefaultEventsMap, any>
+    | undefined
 ): Promise<{ status: number; data: string }> => {
   const { floor, machineId, position, qty } = bodyData
 
@@ -165,7 +174,9 @@ export const checkMachineStatus = async (
       const result = await sendCommandtoCheckMachineStatus(
         cmd,
         runningCheck,
-        socket
+        socket,
+        socketClient,
+        machineId
       )
       const status = result.status
 
@@ -203,6 +214,7 @@ export const checkMachineStatus = async (
       responded = true
       const responseText = data.toString()
       console.log('📥 Final PLC response:', responseText)
+      socketClient?.emit(String(machineId), responseText)
 
       resolve({
         status: 100,

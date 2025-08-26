@@ -1,4 +1,4 @@
-import { Socket } from 'net'
+import { Socket as TcpSocket } from 'net'
 import { getNextRunningNumber } from '../../services/machine/plc.service'
 import { PlcCommand, PlcResponse, PLCStatusError } from '../../types/plc'
 import { PlcCommandRequestBody } from '../../validators/plc.validator'
@@ -9,12 +9,16 @@ import {
 } from '../../services/machine/plc.manual.service'
 import { HttpError } from '../../types/global'
 import { logger } from '../../utils/logger'
+import { DefaultEventsMap, Socket } from 'socket.io'
 
 const TAG = 'PLC-SERVICE'
 
 export const plcSendCommandService = async (
   plcData: PlcCommandRequestBody,
-  socket: Socket
+  socket: TcpSocket,
+  socketClient:
+    | Socket<DefaultEventsMap, DefaultEventsMap, DefaultEventsMap, any>
+    | undefined
 ): Promise<PlcResponse> => {
   const { floor, position, machineId } = plcData
 
@@ -24,7 +28,7 @@ export const plcSendCommandService = async (
 
   try {
     const running = await getNextRunningNumber(machineId)
-    const checkResult = await checkMachineStatus(socket, plcData, running)
+    const checkResult = await checkMachineStatus(socket, plcData, running, socketClient)
     return {
       message: `จัดยาเสร็จ - ชั้น: ${floor} ช่อง: ${position}`,
       plcResponse: checkResult.data
@@ -40,8 +44,11 @@ export const plcSendCommandService = async (
 
 export const plcSendCommandMService = async (
   plcData: PlcCommandRequestBody,
-  socket: Socket,
-  originalCommand: string
+  socket: TcpSocket,
+  originalCommand: string,
+  socketClient:
+    | Socket<DefaultEventsMap, DefaultEventsMap, DefaultEventsMap, any>
+    | undefined
 ): Promise<PlcResponse> => {
   const { command, floor, position, qty, machineId } = plcData
 
@@ -67,10 +74,12 @@ export const plcSendCommandMService = async (
       }, 5000)
 
       socket.once('data', data => {
+        const message = data.toString()
         clearTimeout(timeout)
+        socketClient?.emit(String(machineId), message)
         resolve({
           message: `Command ${command?.toUpperCase()} sent successfully!`,
-          plcResponse: data.toString()
+          plcResponse: message
         })
       })
     })
