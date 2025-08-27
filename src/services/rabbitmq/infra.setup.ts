@@ -7,7 +7,7 @@ const TAG = 'RabbitMQ-Infra'
 const MAIN_EXCHANGE = 'drug_dispenser_exchange'
 const RETRY_DLX = 'retry_dlx'
 const ERROR_DLX = 'error_dlx'
-const RETRY_DELAY = 5000
+const RETRY_DELAY = 1500
 
 export async function setupInfraForSingleMachine (
   machineId: string

@@ -14,26 +14,44 @@ class RabbitMQService {
   private readonly maxRetries = 5
   private readonly longRetryDelay = 30 * 60 * 1000
   private isWaitingForLongRetry = false
+  private healthCheckInterval: NodeJS.Timeout | null = null
+  private readonly healthCheckDelay = 60 * 1000
 
-  public async init (timer: StartupTimer): Promise<void> {
-    if (this.isInitialized || this.isConnecting || this.isWaitingForLongRetry) {
+  public async init (timer?: StartupTimer): Promise<void> {
+    if (this.isConnecting || this.isWaitingForLongRetry) {
       return
     }
 
+    if (this.isInitialized && this.channel) {
+      try {
+        await this.channel.checkQueue('non_existent_queue_for_health_check')
+        return
+      } catch (err) {
+        logger.warn(
+          this.TAG,
+          'Channel seems to be dead. Re-initializing connection.'
+        )
+        this.handleDisconnection(timer, err as Error)
+        return
+      }
+    }
+
     this.isConnecting = true
-    timer.check(this.TAG, 'Attempting to connect...')
+    timer?.check(this.TAG, 'Attempting to connect...')
 
     try {
       const rabbitConfig = config.rabbit
+      const connectionUrl = `amqp://${rabbitConfig.user}:${rabbitConfig.pass}@${rabbitConfig.host}:${rabbitConfig.port}`
+
       this.connectionManager = await amqplib.connect(
-        `amqp://${rabbitConfig.user}:${rabbitConfig.pass}@${rabbitConfig.host}:${rabbitConfig.port}`
+        `${connectionUrl}?heartbeat=30`
       )
 
       this.channel = await this.connectionManager.createChannel()
       this.isInitialized = true
       this.isConnecting = false
 
-      timer.check(
+      timer?.check(
         this.TAG,
         'RabbitMQ Service initialized successfully. Resetting all counters.'
       )
@@ -41,6 +59,8 @@ class RabbitMQService {
       this.isWaitingForLongRetry = false
 
       await this.onRabbitMQConnect(timer)
+
+      this.startHealthCheck(timer)
 
       this.connectionManager.on('error', (err: Error) => {
         logger.error(this.TAG, `RabbitMQ connection error: ${err.message}`)
@@ -58,10 +78,12 @@ class RabbitMQService {
     }
   }
 
-  private handleDisconnection (timer: StartupTimer, error?: any): void {
-    if (this.isWaitingForLongRetry) {
+  private handleDisconnection (timer?: StartupTimer, error?: any): void {
+    if (this.isWaitingForLongRetry || this.isConnecting) {
       return
     }
+
+    this.stopHealthCheck()
 
     this.isInitialized = false
     this.isConnecting = false
@@ -104,6 +126,41 @@ class RabbitMQService {
       }, this.longRetryDelay)
       // พิจารณาปิดแอปพลิเคชันในกรณีนี้ เพราะ Service สำคัญไม่สามารถทำงานได้
       // process.exit(1);
+    }
+  }
+
+  private startHealthCheck (timer?: StartupTimer): void {
+    this.stopHealthCheck()
+    this.healthCheckInterval = setInterval(async () => {
+      if (!this.isInitialized || !this.channel) {
+        logger.warn(
+          this.TAG,
+          '[Health Check] RabbitMQ is not initialized. Skipping check.'
+        )
+        return
+      }
+      logger.info(
+        this.TAG,
+        '[Health Check] Performing channel health check...'
+      )
+      try {
+        await this.channel.checkExchange('amq.direct')
+        logger.info(this.TAG, '[Health Check] Channel is healthy.')
+      } catch (error) {
+        logger.error(
+          this.TAG,
+          '[Health Check] Channel is dead. Triggering reconnection.',
+          error
+        )
+        this.handleDisconnection(timer, error as Error)
+      }
+    }, this.healthCheckDelay)
+  }
+
+  private stopHealthCheck (): void {
+    if (this.healthCheckInterval) {
+      clearInterval(this.healthCheckInterval)
+      this.healthCheckInterval = null
     }
   }
 
@@ -163,6 +220,8 @@ class RabbitMQService {
   }
 
   public async close (): Promise<void> {
+    this.stopHealthCheck()
+
     if (!this.isInitialized) {
       return
     }
@@ -189,7 +248,7 @@ class RabbitMQService {
     return this.isInitialized && !!this.channel && !!this.connectionManager
   }
 
-  private async onRabbitMQConnect (timer: StartupTimer) {
+  private async onRabbitMQConnect (timer?: StartupTimer) {
     try {
       const { setupAllInitialInfrastructure } = await import('./infra.setup')
       const { startAllInitialConsumers } = await import('./consumer.setup')
@@ -199,7 +258,7 @@ class RabbitMQService {
       await startAllInitialConsumers(timer)
       await setupErrorConsumers(timer)
 
-      timer.check(this.TAG, 'All consumers are set up and running.')
+      timer?.check(this.TAG, 'All consumers are set up and running.')
     } catch (error) {
       logger.error(
         'RabbitMQ_Manager',

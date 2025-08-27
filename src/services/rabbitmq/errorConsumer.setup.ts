@@ -6,7 +6,7 @@ import StartupTimer from '../../utils/timer'
 
 const TAG = 'ErrorConsumer'
 
-export async function setupErrorConsumers (timer: StartupTimer) {
+export async function setupErrorConsumers (timer?: StartupTimer) {
   const channel = rabbitService.getChannel()
   const allMachines = await prisma.machines.findMany({
     select: { id: true },
@@ -17,7 +17,7 @@ export async function setupErrorConsumers (timer: StartupTimer) {
     return
   }
 
-  timer.check(
+  timer?.check(
     TAG,
     `Setting up error consumers for ${allMachines.length} machines...`
   )
@@ -78,7 +78,7 @@ export async function setupErrorConsumers (timer: StartupTimer) {
   )
 
   if (successCount > 0) {
-    timer.check(TAG, `Successfully set up ${successCount} error consumers.`)
+    timer?.check(TAG, `Successfully set up ${successCount} error consumers.`)
   }
 
   if (successCount < allMachines.length) {

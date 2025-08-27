@@ -37,13 +37,31 @@ export async function startConsumerForSingleMachine (
         if (!msg) return
         const order: SocketPayload = JSON.parse(msg.content.toString())
         try {
+          logger.debug(consumerTag, `[START] Processing order ${order.orderId}`)
           const socket = tcpService.getSocketByMachineId(machineId)
+
           if (!socket || socket.destroyed)
             throw new Error('Socket not connected')
+
+          logger.debug(
+            consumerTag,
+            `[Step 1/4] Finding available slot for order ${order.orderId}...`
+          )
           const slot = await plcService.findAvailableSlot(socket, machineId)
+
+          logger.debug(
+            consumerTag,
+            `[Step 2/4] Checking if slot '${slot}' is busy...`
+          )
           if (pickupService.isSlotBusy(machineId, slot))
             throw new Error(`Target slot (${slot}) is locked for pickup.`)
+
+          logger.debug(
+            consumerTag,
+            `[Step 3/4] Updating DB status to 'pending'...`
+          )
           await updateOrderStatus(order.orderId, 'pending')
+
           const slotIdentifier = slot === 'right' ? 'M01' : 'M02'
           await updateOrderSlot(order.orderId, slotIdentifier)
           const socketClient = socketService.getSocketById(order.socketId)
@@ -54,7 +72,13 @@ export async function startConsumerForSingleMachine (
               message: 'Update order to pending.'
             })
           }
+
+          logger.debug(
+            consumerTag,
+            `[Step 4/4] Commanding PLC to dispense drug...`
+          )
           const dispensed = await plcService.dispenseDrug(socket, order, slot)
+
           if (dispensed) {
             await updateOrderStatus(order.orderId, 'dispensed')
             if (socketClient) {
@@ -65,11 +89,20 @@ export async function startConsumerForSingleMachine (
               })
             }
             channel.ack(msg)
+            logger.debug(
+              consumerTag,
+              `[SUCCESS] Order ${order.orderId} processed and acknowledged.`
+            )
             await delay(500)
           } else {
             throw new Error('Dispense-failed-non-92')
           }
         } catch (error) {
+          logger.error(
+            consumerTag,
+            `[FAIL] Failed to process order ${order.orderId}`,
+            error
+          )
           const errorMessage = (error as Error).message
           if (process.env.NODE_ENV === 'development') {
             logger.error(
