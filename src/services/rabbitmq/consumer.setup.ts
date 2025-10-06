@@ -61,6 +61,19 @@ export async function startConsumerForSingleMachine (
             `[Step 3/4] Updating DB status to 'pending'...`
           )
 
+          const existingOrder = await prisma.orders.findUnique({
+            where: { id: order.orderId }
+          })
+
+          if (!existingOrder) {
+            logger.warn(
+              consumerTag,
+              `Orphaned message detected for a non-existent order ID: ${order.orderId}. Acknowledging and discarding.`
+            )
+            channel.ack(msg)
+            return
+          }
+
           try {
             logger.debug(
               consumerTag,
