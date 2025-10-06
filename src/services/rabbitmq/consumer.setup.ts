@@ -60,7 +60,28 @@ export async function startConsumerForSingleMachine (
             consumerTag,
             `[Step 3/4] Updating DB status to 'pending'...`
           )
-          await updateOrderStatus(order.orderId, 'pending')
+
+          try {
+            logger.debug(
+              consumerTag,
+              `Updating order ${order.orderId} status to 'pending'...`
+            )
+            await updateOrderStatus(order.orderId, 'pending')
+          } catch (dbError) {
+            logger.error(
+              consumerTag,
+              `CRITICAL: Failed to update order status to 'pending' for order ${order.orderId}. Acknowledging message to prevent queue block.`,
+              dbError
+            )
+
+            channel.publish(ERROR_DLX, machineId, msg.content, {
+              persistent: true
+            })
+
+            channel.ack(msg)
+
+            return
+          }
 
           const slotIdentifier = slot === 'right' ? 'M01' : 'M02'
           await updateOrderSlot(order.orderId, slotIdentifier)

@@ -56,6 +56,7 @@ export async function createPrescriptionFromPharmacy (
   userId: string,
   socketId: string
 ): Promise<Prescription> {
+
   const pharmacyData = await getPharmacyPrescriptionData(rfid)
 
   const existingPrescription = await prisma.prescription.findUnique({

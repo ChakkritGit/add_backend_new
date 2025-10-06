@@ -16,8 +16,8 @@ import {
   PickupNextParamsDrugSchema
 } from '../../validators/order.validator'
 import { socketService } from '../../services/socket/socket.service'
-import { logger } from '../../utils/logger'
 import { Machines } from '@prisma/client'
+import { tcpService } from '../../services/tcp/tcp.service'
 
 export const getOrderDispense = async (
   req: Request,
@@ -66,8 +66,19 @@ export const dispenseNewPrescription = async (
       throw new HttpError(400, 'RFID and Machine ID are required.')
     }
 
+    const checkMachineStatus = tcpService.getSocketByMachineId(
+      validatedBody.machineId
+    )
+
     const checkMachineOnline: Machines | null =
       await orderService.checkMachineOnline(validatedBody.machineId)
+
+    if (!checkMachineStatus) {
+      throw new HttpError(
+        500,
+        `Machine ${validatedBody.machineId} not connected.`
+      )
+    }
 
     if (!checkMachineOnline) {
       throw new HttpError(404, `Machine ${validatedBody.machineId} not found.`)
