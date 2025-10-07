@@ -113,7 +113,7 @@ export async function startConsumerForSingleMachine (
           )
           const dispensed = await plcService.dispenseDrug(socket, order, slot)
 
-          if (dispensed) {
+          if (dispensed.success === '1' && dispensed.dispensedQty > 0) {
             await updateOrderStatus(order.orderId, 'dispensed')
             if (socketClient) {
               socketClient.emit('drug_dispensed', {
@@ -128,6 +128,16 @@ export async function startConsumerForSingleMachine (
               `[SUCCESS] Order ${order.orderId} processed and acknowledged.`
             )
             await delay(500)
+          } else if (
+            dispensed.success === '0' &&
+            dispensed.dispensedQty === 0
+          ) {
+            logger.warn(
+              consumerTag,
+              `RETRY: Dispense process completed for order ${order.orderId}, but quantity is 0 (Item likely out of stock).`
+            )
+
+            throw new Error('Dispense-failed-qty-zero')
           } else {
             throw new Error('Dispense-failed-non-92')
           }
@@ -145,12 +155,70 @@ export async function startConsumerForSingleMachine (
               error
             )
           }
-          if (
+          if (errorMessage.includes('Dispense-failed-non-92')) {
+            const socketClient = socketService.getSocketById(order.socketId)
+            await updateOrderStatus(order.orderId, 'error')
+            channel.publish(ERROR_DLX, machineId, msg.content, {
+              persistent: true
+            })
+            channel.ack(msg)
+            if (socketClient) {
+              socketClient.emit('drug_dispensed', {
+                orderId: order.orderId,
+                data: null,
+                message: 'Update order to error.'
+              })
+            }
+          }
+          if (errorMessage.includes('Dispense-failed-qty-zero')) {
+            const headers = msg.properties.headers || {}
+            const retryCount = (headers['x-retry-count'] || 0) + 1
+
+            logger.warn(
+              consumerTag,
+              `Order ${order.orderId} failed due to zero quantity. Retry attempt ${retryCount}.`
+            )
+
+            if (retryCount > 2) {
+              const socketClient = socketService.getSocketById(order.socketId)
+              logger.error(
+                consumerTag,
+                `-> Order ${order.orderId} failed after ${
+                  retryCount - 1
+                } retry attempts for zero quantity. Sending to error queue.`
+              )
+
+              await updateOrderStatus(order.orderId, 'error')
+              channel.publish(ERROR_DLX, machineId, msg.content, {
+                persistent: true
+              })
+              if (socketClient) {
+                socketClient.emit('drug_dispensed', {
+                  orderId: order.orderId,
+                  data: null,
+                  message: 'Update order to error.'
+                })
+              }
+              channel.ack(msg)
+            } else {
+              logger.warn(
+                consumerTag,
+                `-> Sending to retry queue for ${RETRY_DELAY / 1000}s.`
+              )
+
+              const newHeaders = { ...headers, 'x-retry-count': retryCount }
+
+              channel.publish(RETRY_DLX, machineId, msg.content, {
+                persistent: true,
+                headers: newHeaders
+              })
+              channel.ack(msg)
+            }
+          } else if (
             errorMessage.includes('Tray is full') ||
             errorMessage.includes('Socket not connected') ||
             errorMessage.includes('Timeout waiting for response') ||
             errorMessage.includes('is locked for pickup') ||
-            errorMessage.includes('Dispense-failed-non-92') ||
             errorMessage.includes('Dispense process timed out')
           ) {
             if (process.env.NODE_ENV === 'development') {

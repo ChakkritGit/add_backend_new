@@ -136,6 +136,29 @@ class PickupService {
             `Emitting PICKUP_COMPLETED for machine: ${machineId}`
           )
           systemEventEmitter.emit(SystemEvents.PICKUP_COMPLETED, { machineId })
+        } else if (doorIsClosed && !trayIsEmpty) {
+          clearInterval(intervalId)
+          this.busySlots.delete(slotIdentifier)
+          logger.warn(
+            TAG,
+            `RESET: User closed the door but did not pick up the item for order ${orderId}. Resetting status to 'dispensed'.`
+          )
+
+          await updateOrderStatus(orderId, 'dispensed')
+
+          await plcService.turnOffLight(socket, machineId, slot)
+
+          const socketClient = socketService.getSocketById(socketId)
+          if (socketClient) {
+            socketClient.emit('drug_dispensed', {
+              orderId: orderId,
+              message:
+                'Door was closed without taking the item. Please scan again to open the door.',
+              data: { status: 'dispensed' }
+            })
+          }
+
+          systemEventEmitter.emit(SystemEvents.PICKUP_COMPLETED, { machineId })
         }
       } catch (error) {
         logger.error(
@@ -143,6 +166,8 @@ class PickupService {
           `Error in pickup completion loop for ${orderId}:`,
           error
         )
+        clearInterval(intervalId)
+        this.busySlots.delete(slotIdentifier)
       }
     }, PICKUP_CHECK_INTERVAL)
   }

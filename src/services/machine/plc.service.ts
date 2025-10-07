@@ -1,6 +1,7 @@
 import { Socket } from 'net'
 import prisma from '../../config/prisma'
 import { logger } from '../../utils/logger'
+import { DispenseResult } from '../../types/global'
 
 const TAG = 'PLCService'
 
@@ -140,7 +141,7 @@ class PlcService {
       quantity: number
     },
     slot: 'left' | 'right'
-  ): Promise<boolean> {
+  ): Promise<DispenseResult> {
     const transition = await getNextRunningNumber(order.machineId)
     try {
       const commandCode = slot === 'right' ? 1 : 2
@@ -152,7 +153,7 @@ class PlcService {
         transition: transition
       })
 
-      return await new Promise<boolean>((resolve, reject) => {
+      return await new Promise<DispenseResult>((resolve, reject) => {
         const timeoutMs = 20000
         let got91 = false
 
@@ -190,7 +191,8 @@ class PlcService {
               TAG,
               `PLC confirmed dispense success (T92) for N=${transition}.`
             )
-            resolve(true)
+            const dispensedQty = parseInt(response.substring(9, 13), 10)
+            resolve({ success: '1', dispensedQty: dispensedQty })
           } else {
             clearTimeout(timeoutId)
             socket.removeListener('data', onData)
@@ -198,7 +200,7 @@ class PlcService {
               TAG,
               `Received unexpected code T${responseCode} for dispense command N=${transition}`
             )
-            resolve(false)
+            resolve({ success: '0', dispensedQty: 0, errorCode: responseCode })
           }
         }
 
@@ -215,7 +217,7 @@ class PlcService {
         `Dispense drug process (N=${transition}) failed entirely:`,
         (error as Error).message
       )
-      return false
+      return { success: '0', dispensedQty: 0 }
     }
   }
 

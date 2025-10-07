@@ -16,4 +16,10 @@ interface BaseResponse<T = unknown> {
   traceStack?: string
 }
 
-export { BaseResponse }
+interface DispenseResult {
+  success: string
+  dispensedQty: number
+  errorCode?: string
+}
+
+export { BaseResponse, DispenseResult }
